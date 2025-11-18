@@ -55,27 +55,35 @@ async function branchExists(root: string, branchName: string): Promise<boolean> 
   return stdout.trim().length > 0;
 }
 
+async function findAvailableWorktreeName(
+  root: string,
+  prlDir: string,
+  baseName: string
+): Promise<string> {
+  let candidate = baseName;
+  let counter = 1;
+
+  while (
+    existsSync(join(prlDir, candidate)) ||
+    (await branchExists(root, buildBranchName(candidate)))
+  ) {
+    candidate = `${baseName}-${counter}`;
+    counter++;
+  }
+
+  return candidate;
+}
+
 export async function createWorktree(
   agent: string,
   suffix?: string
 ): Promise<WorktreeDescriptor> {
   const root = await getRepoRoot();
-  const worktreeName = buildWorktreeName(agent, suffix);
-  const branchName = buildBranchName(worktreeName);
   const prlDir = ensurePrlDirectory(root);
+  const baseName = buildWorktreeName(agent, suffix);
+  const worktreeName = await findAvailableWorktreeName(root, prlDir, baseName);
+  const branchName = buildBranchName(worktreeName);
   const worktreePath = join(prlDir, worktreeName);
-
-  if (existsSync(worktreePath)) {
-    throw new Error(
-      `The worktree at ${worktreePath} already exists. Pick a different agent or suffix.`
-    );
-  }
-
-  if (await branchExists(root, branchName)) {
-    throw new Error(
-      `Branch ${branchName} already exists. Try a different suffix or prune old agents.`
-    );
-  }
 
   await execa(
     "git",
@@ -86,10 +94,23 @@ export async function createWorktree(
     }
   );
 
-  await execa("npm", ["install"], {
-    cwd: worktreePath,
-    stdio: "inherit"
-  });
+  try {
+    console.log("Running npm install inside the agent worktree...");
+    await execa("npm", ["install"], {
+      cwd: worktreePath,
+      stdio: "inherit"
+    });
+  } catch (error) {
+    console.warn(
+      "npm install failed inside the agent worktree—continuing with shell startup."
+    );
+  }
+
+  if (worktreeName !== baseName) {
+    console.log(
+      `Worktree name conflict detected—using ${worktreeName} instead of ${baseName}.`
+    );
+  }
 
   return {
     agent,

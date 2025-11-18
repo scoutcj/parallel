@@ -15,6 +15,17 @@ program
     // noop placeholder for future globals
   });
 
+program.allowUnknownOption(true);
+const rawArgs = process.argv.slice(2);
+const parsedInputs = program.parseOptions(rawArgs);
+const ignoredAgentOptions = parsedInputs.unknown;
+
+if (ignoredAgentOptions.length) {
+  console.warn(
+    `Ignoring unrecognized arguments: ${ignoredAgentOptions.join(" ")}`
+  );
+}
+
 program
   .command("apply")
   .description("Merge the current agent branch into main and optionally clean up")

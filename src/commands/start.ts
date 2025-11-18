@@ -10,19 +10,22 @@ interface StartOptions {
   suffix?: string;
 }
 
-function resolveShell(): string {
-  if (process.platform === "win32") {
-    return process.env.COMSPEC ?? "cmd.exe";
-  }
-  return process.env.SHELL ?? "/bin/bash";
-}
+async function runAgentCommand(
+  descriptor: WorktreeDescriptor,
+  agentName: string
+): Promise<void> {
+  console.log(`Running agent command: ${agentName}`);
 
-async function openShell(descriptor: WorktreeDescriptor): Promise<void> {
-  const shell = resolveShell();
-  await execa(shell, [], {
-    cwd: descriptor.worktreePath,
-    stdio: "inherit"
-  });
+  try {
+    await execa(agentName, {
+      cwd: descriptor.worktreePath,
+      stdio: "inherit"
+    });
+  } catch (error) {
+    console.error(
+      `Agent command ${agentName} failed; you can recover inside ${descriptor.worktreePath}.`
+    );
+  }
 }
 
 async function askToPrune(descriptor: WorktreeDescriptor): Promise<void> {
@@ -56,7 +59,7 @@ export async function startAgent(
   );
 
   try {
-    await openShell(descriptor);
+    await runAgentCommand(descriptor, agentName);
   } finally {
     await askToPrune(descriptor);
   }
