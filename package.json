@@ -1,0 +1,46 @@
+{
+  "name": "git-prl",
+  "version": "0.1.0",
+  "description": "CLI wrapper around git worktrees for running agents in parallel",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "git-prl": "./bin/prl.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/scoutcj/parallel.git"
+  },
+  "keywords": [
+    "git",
+    "worktree",
+    "cli",
+    "agents",
+    "parallel"
+  ],
+  "author": "Scout CJ",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^11.0.0",
+    "execa": "^7.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "ts-node": "^10.9.1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ]
+}
+
