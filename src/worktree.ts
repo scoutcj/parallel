@@ -5,15 +5,18 @@ import {join} from "path";
 
 const {readdir} = fsPromises;
 
-const PRL_WORKTREES_DIR = ".git/worktrees/prl";
+const PRL_WORKTREES_DIR = ".prl-worktrees";
 
 export interface WorktreeDescriptor {
   agent: string;
-  suffix?: string;
   branchName: string;
   worktreeName: string;
   worktreePath: string;
   root: string;
+}
+
+export interface CreateWorktreeOptions {
+  worktreeName?: string;
 }
 
 export async function getRepoRoot(): Promise<string> {
@@ -38,10 +41,9 @@ function sanitizeSegment(segment: string): string {
     .replace(/-+/g, "-");
 }
 
-function buildWorktreeName(agent: string, suffix?: string): string {
+function buildWorktreeName(agent: string): string {
   const agentSegment = sanitizeSegment(agent) || "agent";
-  const suffixSegment = suffix ? sanitizeSegment(suffix) : "";
-  return suffixSegment ? `${agentSegment}-${suffixSegment}` : agentSegment;
+  return agentSegment;
 }
 
 function buildBranchName(worktreeName: string): string {
@@ -74,25 +76,127 @@ async function findAvailableWorktreeName(
   return candidate;
 }
 
+async function findAvailableBranchName(
+  root: string,
+  agent: string
+): Promise<string> {
+  const agentSegment = sanitizeSegment(agent) || "agent";
+  let branchName = `prl/${agentSegment}-1`;
+  let counter = 1;
+
+  while (await branchExists(root, branchName)) {
+    counter++;
+    branchName = `prl/${agentSegment}-${counter}`;
+  }
+
+  if (counter > 1) {
+    console.log(
+      `Branch name conflict detected—using ${branchName} instead of prl/${agentSegment}-1.`
+    );
+  }
+
+  return branchName;
+}
+
 export async function createWorktree(
   agent: string,
-  suffix?: string
+  options: CreateWorktreeOptions = {}
 ): Promise<WorktreeDescriptor> {
   const root = await getRepoRoot();
   const prlDir = ensurePrlDirectory(root);
-  const baseName = buildWorktreeName(agent, suffix);
-  const worktreeName = await findAvailableWorktreeName(root, prlDir, baseName);
-  const branchName = buildBranchName(worktreeName);
+  
+  let worktreeName: string;
+  let branchName: string;
+
+  if (options.worktreeName) {
+    // Explicit worktree name provided
+    worktreeName = sanitizeSegment(options.worktreeName);
+    const worktreePath = join(prlDir, worktreeName);
+    
+    // Check if worktree directory already exists
+    if (existsSync(worktreePath)) {
+      throw new Error(
+        `Worktree directory '.prl-worktrees/${worktreeName}' already exists. Choose a different name.`
+      );
+    }
+    
+    // Branch name is auto-incremented based on agent name
+    branchName = await findAvailableBranchName(root, agent);
+  } else {
+    // Default: use agent name for both worktree and branch
+    const baseName = buildWorktreeName(agent);
+    worktreeName = await findAvailableWorktreeName(root, prlDir, baseName);
+    branchName = buildBranchName(worktreeName);
+    
+    if (worktreeName !== baseName) {
+      console.log(
+        `Worktree name conflict detected—using ${worktreeName} instead of ${baseName}.`
+      );
+    }
+  }
+
   const worktreePath = join(prlDir, worktreeName);
 
-  await execa(
-    "git",
-    ["worktree", "add", "-b", branchName, worktreePath, "HEAD"],
-    {
-      cwd: root,
-      stdio: "inherit"
+  // Install signal handlers for cleanup on interruption during worktree creation
+  let worktreeCreated = false;
+  let branchCreated = false;
+  
+  const cleanup = async () => {
+    try {
+      // Try to remove worktree if it was created
+      if (worktreeCreated && existsSync(worktreePath)) {
+        await execa("git", ["worktree", "remove", "--force", worktreePath], {
+          cwd: root,
+          stdio: "ignore"
+        });
+      }
+      // Try to delete branch if it was created
+      if (branchCreated && (await branchExists(root, branchName))) {
+        await execa("git", ["branch", "-D", branchName], {
+          cwd: root,
+          stdio: "ignore"
+        });
+      }
+    } catch (error) {
+      // Ignore cleanup errors
     }
-  );
+  };
+
+  const signalHandler = (signal: NodeJS.Signals) => {
+    // Run cleanup asynchronously, then exit
+    cleanup()
+      .then(() => {
+        console.error("\nWorktree creation interrupted. Cleaned up partial state.");
+        process.exit(1);
+      })
+      .catch(() => {
+        process.exit(1);
+      });
+  };
+
+  process.on("SIGINT", signalHandler);
+  process.on("SIGTERM", signalHandler);
+
+  try {
+    await execa(
+      "git",
+      ["worktree", "add", "-b", branchName, worktreePath, "HEAD"],
+      {
+        cwd: root,
+        stdio: "inherit"
+      }
+    );
+    worktreeCreated = true;
+    branchCreated = true;
+  } catch (error) {
+    // If worktree creation failed, try to clean up any partial state
+    await cleanup();
+    throw error;
+  } finally {
+    // Remove signal handlers after worktree creation attempt
+    process.removeListener("SIGINT", signalHandler);
+    process.removeListener("SIGTERM", signalHandler);
+  }
 
   try {
     console.log("Running npm install inside the agent worktree...");
@@ -106,15 +210,8 @@ export async function createWorktree(
     );
   }
 
-  if (worktreeName !== baseName) {
-    console.log(
-      `Worktree name conflict detected—using ${worktreeName} instead of ${baseName}.`
-    );
-  }
-
   return {
     agent,
-    suffix,
     worktreeName,
     branchName,
     worktreePath,
@@ -167,8 +264,7 @@ export async function listWorktrees(
         branchName: buildBranchName(worktreeName),
         worktreeName,
         worktreePath: join(prlDir, worktreeName),
-        root,
-        suffix: undefined
+        root
       };
     });
 }

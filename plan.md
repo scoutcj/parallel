@@ -6,7 +6,7 @@ Build a Node-based, npm-installable CLI distributed as `git prl` that automates 
 ### Command Surface (MVP)
 
 - `git prl <agent> [--name <suffix>]`
-  - Creates a worktree under `.git/worktrees/prl/<agent>-<suffix?>` and branch `prl/<agent>` or `prl/<agent>-<suffix>`.
+  - Creates a worktree under `.prl-worktrees/<agent>-<suffix?>` and branch `prl/<agent>` or `prl/<agent>-<suffix>`.
   - Runs `npm install` inside the worktree before dropping the user into a shell layered on that branch.
   - Hooks `exit`/`SIGINT` to prompt the user whether to delete the worktree/branch on close; if they decline, leave state for manual cleanup.
 
@@ -15,7 +15,7 @@ Build a Node-based, npm-installable CLI distributed as `git prl` that automates 
   - After a successful merge, optionally prune the agent branch/worktree (and surface instructions for rerunning `apply` after fixing conflicts).
 
 - `git prl list`
-  - Enumerates `.git/worktrees/prl/*` along with branch names and whether the worktree is currently mounted so users can see running agents in parallel.
+  - Enumerates `.prl-worktrees/*` along with branch names and whether the worktree is currently mounted so users can see running agents in parallel.
 
 - `git prl prune`
   - Removes dangling `prl/*` worktrees/branches that are no longer active (e.g., after crashes or `apply`).
