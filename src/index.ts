@@ -10,21 +10,12 @@ program
   .name("git prl")
   .description("Run parallel agents each in their own git worktree")
   .argument("<agent>", "Name of the agent to run")
-  .option("-n, --name <suffix>", "Add a suffix to the agent branch/worktree name")
+  .option("-w, --worktree <name>", "Explicitly name the worktree directory")
   .hook("preAction", () => {
     // noop placeholder for future globals
   });
 
 program.allowUnknownOption(true);
-const rawArgs = process.argv.slice(2);
-const parsedInputs = program.parseOptions(rawArgs);
-const ignoredAgentOptions = parsedInputs.unknown;
-
-if (ignoredAgentOptions.length) {
-  console.warn(
-    `Ignoring unrecognized arguments: ${ignoredAgentOptions.join(" ")}`
-  );
-}
 
 program
   .command("apply")
@@ -53,9 +44,36 @@ program.action(async (agentName: string) => {
     process.exit(1);
   }
 
+  // Parse arguments: everything before agent name = git prl flags, everything after = agent args
+  const rawArgs = process.argv.slice(2);
+  
+  // Find where agent name appears in args (could be after flags like --worktree)
+  let agentIndex = -1;
+  for (let i = 0; i < rawArgs.length; i++) {
+    // Skip known flags and their values
+    if (rawArgs[i] === "-w" || rawArgs[i] === "--worktree") {
+      i++; // Skip the flag value
+      continue;
+    }
+    if (rawArgs[i] === agentName) {
+      agentIndex = i;
+      break;
+    }
+  }
+  
+  if (agentIndex === -1) {
+    // Shouldn't happen, but handle gracefully
+    program.outputHelp();
+    process.exit(1);
+  }
+  
+  // Everything after agent name is passed to the agent
+  const agentArgs = rawArgs.slice(agentIndex + 1);
+
   const options = program.opts();
   await startAgent(agentName, {
-    suffix: options.name
+    worktreeName: options.worktree,
+    agentArgs
   });
 });
 
