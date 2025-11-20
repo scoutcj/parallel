@@ -20,8 +20,9 @@ program.allowUnknownOption(true);
 program
   .command("apply")
   .description("Merge the current agent branch into main and optionally clean up")
-  .action(async () => {
-    await applyAgent();
+  .option("--auto-cleanup", "Automatically delete worktree after successful merge")
+  .action(async (options) => {
+    await applyAgent(options.autoCleanup);
   });
 
 program
