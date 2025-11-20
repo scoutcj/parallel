@@ -19,6 +19,11 @@ Build a Node-based, npm-installable CLI distributed as `git prl` that automates 
 
 - `git prl prune`
   - Removes dangling `prl/*` worktrees/branches that are no longer active (e.g., after crashes or `apply`).
+  - **Active vs Inactive Worktrees:**
+    - **Active worktree:** Has uncommitted changes or is currently being used by an agent. Should NOT be pruned automatically.
+    - **Inactive worktree:** Already merged into main (or base branch) and has no uncommitted changes. Safe to prune.
+  - Should detect worktree state and warn user before pruning active worktrees.
+  - Git will handle detection of uncommitted changes when attempting to remove worktrees.
 
 ### Behaviors to Note
 
