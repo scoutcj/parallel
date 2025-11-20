@@ -1,7 +1,7 @@
 import {execa} from "execa";
 import {mkdirSync, existsSync} from "fs";
 import {promises as fsPromises} from "fs";
-import {join} from "path";
+import {join, dirname, resolve} from "path";
 
 const {readdir} = fsPromises;
 
@@ -20,8 +20,17 @@ export interface CreateWorktreeOptions {
 }
 
 export async function getRepoRoot(): Promise<string> {
-  const {stdout} = await execa("git", ["rev-parse", "--show-toplevel"]);
-  return stdout.trim();
+  // Use --git-common-dir to get the actual repository root, even when inside a worktree
+  // This returns the .git directory (or common git dir for worktrees)
+  // The repository root is the parent of this directory
+  const {stdout: gitCommonDir} = await execa("git", ["rev-parse", "--git-common-dir"]);
+  const commonDir = gitCommonDir.trim();
+  
+  // Resolve to absolute path (handles both absolute and relative paths)
+  const absoluteCommonDir = resolve(process.cwd(), commonDir);
+  
+  // The repository root is the parent of the .git directory
+  return dirname(absoluteCommonDir);
 }
 
 function ensurePrlDirectory(root: string): string {
