@@ -107,12 +107,26 @@ trap - SIGINT SIGTERM
 copy_template_to_worktree "$TEMPLATE_PATH" "$WORKTREE_PATH"
 
 # Step 7: Run npm install (non-blocking)
+# Install in root if package.json exists
 if [ -f "$WORKTREE_PATH/package.json" ]; then
   echo "Running npm install inside the agent worktree..."
   if ! (cd "$WORKTREE_PATH" && npm install); then
     echo "Warning: npm install failed inside the agent worktree—continuing with shell startup." >&2
   fi
 fi
+
+# Also install in common subdirectories (monorepo support)
+# Look for package.json in direct subdirectories (max depth 1, exclude node_modules)
+for subdir in "$WORKTREE_PATH"/*; do
+  if [ -d "$subdir" ] && [ "$(basename "$subdir")" != "node_modules" ]; then
+    if [ -f "$subdir/package.json" ]; then
+      echo "Running npm install in $(basename "$subdir")..."
+      if ! (cd "$subdir" && npm install); then
+        echo "Warning: npm install failed in $(basename "$subdir")—continuing." >&2
+      fi
+    fi
+  fi
+done
 
 # Output worktree info to stderr (for Node.js to parse, separate from agent output)
 echo "WORKTREE_INFO_START" >&2
