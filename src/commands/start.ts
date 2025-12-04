@@ -1,44 +1,67 @@
 import {execa} from "execa";
 import {confirm} from "../utils/prompt";
-import {
-  createWorktree,
-  removeWorktree,
-  WorktreeDescriptor
-} from "../worktree";
+import {getScriptPath} from "../utils/scripts";
+import {WorktreeDescriptor} from "../worktree";
 
 interface StartOptions {
   worktreeName?: string;
   agentArgs?: string[];
 }
 
-async function validateAgentCommand(agentName: string): Promise<void> {
-  try {
-    // Use 'command -v' (Unix) to check if command exists in PATH
-    await execa("command", ["-v", agentName]);
-  } catch (error) {
-    throw new Error(
-      `${agentName} is not a command that can launch an agent. Is it installed and in your PATH?`
-    );
-  }
-}
+/**
+ * Parse structured output from prl-start.sh (from stderr)
+ */
+function parseStartOutput(stderr: string): {
+  descriptor: WorktreeDescriptor;
+  agentRan: boolean;
+} {
+  const lines = stderr.split("\n");
+  let inWorktreeInfo = false;
+  const info: Partial<WorktreeDescriptor> = {};
+  let agentRan = false;
 
-async function runAgentCommand(
-  descriptor: WorktreeDescriptor,
-  agentName: string,
-  agentArgs: string[] = []
-): Promise<void> {
-  console.log(`Running agent command: ${agentName}${agentArgs.length > 0 ? ` ${agentArgs.join(" ")}` : ""}`);
-
-  try {
-    await execa(agentName, agentArgs, {
-      cwd: descriptor.worktreePath,
-      stdio: "inherit"
-    });
-  } catch (error) {
-    console.error(
-      `Agent command ${agentName} failed; you can recover inside ${descriptor.worktreePath}.`
-    );
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    if (line === "WORKTREE_INFO_START") {
+      inWorktreeInfo = true;
+      continue;
+    }
+    
+    if (line === "WORKTREE_INFO_END") {
+      inWorktreeInfo = false;
+      continue;
+    }
+    
+    if (line.startsWith("SHELL_READY")) {
+      agentRan = true;
+      // Also parse WORKTREE_PATH from this line if present
+      const worktreeMatch = line.match(/WORKTREE_PATH=(.+)/);
+      if (worktreeMatch && !info.worktreePath) {
+        info.worktreePath = worktreeMatch[1];
+      }
+      continue;
+    }
+    
+    if (inWorktreeInfo) {
+      const [key, ...valueParts] = line.split("=");
+      const value = valueParts.join("="); // Handle values with = in them
+      if (key === "AGENT") info.agent = value;
+      if (key === "WORKTREE_NAME") info.worktreeName = value;
+      if (key === "BRANCH_NAME") info.branchName = value;
+      if (key === "WORKTREE_PATH") info.worktreePath = value;
+      if (key === "ROOT") info.root = value;
+    }
   }
+
+  if (!info.agent || !info.worktreeName || !info.branchName || !info.worktreePath || !info.root) {
+    throw new Error("Failed to parse worktree info from bash script output");
+  }
+
+  return {
+    descriptor: info as WorktreeDescriptor,
+    agentRan
+  };
 }
 
 function getShellPath(): string {
@@ -82,6 +105,28 @@ async function openWorktreeShell(
   }
 }
 
+async function removeWorktree(descriptor: WorktreeDescriptor): Promise<void> {
+  const scriptPath = getScriptPath("prl-common.sh");
+  // We'll use a simple git command approach for cleanup
+  try {
+    await execa("git", ["worktree", "remove", "--force", descriptor.worktreePath], {
+      cwd: descriptor.root,
+      stdio: "ignore"
+    });
+  } catch (error) {
+    // continue even if removal fails, to attempt branch cleanup
+  }
+
+  try {
+    await execa("git", ["branch", "-D", descriptor.branchName], {
+      cwd: descriptor.root,
+      stdio: "ignore"
+    });
+  } catch (error) {
+    // ignore missing branch
+  }
+}
+
 async function askToPrune(descriptor: WorktreeDescriptor): Promise<void> {
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     console.log(
@@ -107,21 +152,38 @@ export async function startAgent(
   agentName: string,
   options: StartOptions
 ): Promise<void> {
-  // Validate agent command exists before creating worktree
-  await validateAgentCommand(agentName);
+  const scriptPath = getScriptPath("prl-start.sh");
+  
+  // Build arguments for bash script
+  const scriptArgs: string[] = [agentName];
+  if (options.worktreeName) {
+    scriptArgs.push(options.worktreeName);
+  } else {
+    scriptArgs.push(""); // Empty string for no explicit worktree name
+  }
+  // Add agent args
+  if (options.agentArgs && options.agentArgs.length > 0) {
+    scriptArgs.push(...options.agentArgs);
+  }
 
-  const descriptor = await createWorktree(agentName, {
-    worktreeName: options.worktreeName
+  // Run bash script
+  // Structured output goes to stderr, agent output goes to stdout (inherited)
+  const result = await execa("bash", [scriptPath, ...scriptArgs], {
+    stdio: ["inherit", "inherit", "pipe"], // stdin: inherit, stdout: inherit, stderr: pipe
+    reject: false
   });
+
+  // Parse structured output from stderr
+  const {descriptor, agentRan} = parseStartOutput(result.stderr);
+  
   console.log(
     `Worktree ${descriptor.worktreeName} is ready at ${descriptor.worktreePath}.`
   );
 
   try {
-    await runAgentCommand(descriptor, agentName, options.agentArgs);
+    // Open interactive shell (bash script already ran agent if args were provided)
     await openWorktreeShell(descriptor);
   } finally {
     await askToPrune(descriptor);
   }
 }
-

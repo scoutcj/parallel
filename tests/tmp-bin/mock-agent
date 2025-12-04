@@ -1,0 +1,5 @@
+#!/bin/bash
+# Mock agent for testing
+# Just exits successfully - we're testing the worktree setup, not the agent itself
+echo "Mock agent executed in: $(pwd)"
+exit 0
